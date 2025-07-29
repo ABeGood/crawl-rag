@@ -134,7 +134,8 @@ def extract_data(div, url:str) -> Dict[str, Union[str, List[str], float, None]]:
         'description': None,
         'suitable_for': None,
         'how_to_use': None,
-        'ingredients': None
+        'ingredients': None,
+        'price': None
     }
     
     # Extract category from breadcrumbs
@@ -166,29 +167,47 @@ def extract_data(div, url:str) -> Dict[str, Union[str, List[str], float, None]]:
         for p in paragraphs:
             p_text = p.get_text().strip()
             
-            # Extract purpose (first paragraph with only strong content)
-            if not data['purpose']:
-                strong_only = p.find('strong')
-                if strong_only and p_text == strong_only.get_text().strip():
-                    data['purpose'] = p_text
+            # Check if paragraph starts with purpose in strong tag
+            strong_first = p.find('strong')
+            if strong_first and not data['purpose']:
+                strong_text = strong_first.get_text().strip()
+                # Check if it looks like a purpose (uppercase with dashes/hyphens)
+                if re.match(r'^[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ\s–\-]+$', strong_text):
+                    purpose_list = [item.strip() for item in strong_text.split('–') if item.strip()]
+                    data['purpose'] = purpose_list
+                    # Extract remaining text as description
+                    if not data['description']:
+                        # Remove the strong content and clean up
+                        remaining_text = p_text.replace(strong_text, '').strip()
+                        remaining_text = re.sub(r'^[\s\-–]+', '', remaining_text)  # Remove leading dashes/spaces
+                        if remaining_text:
+                            data['description'] = remaining_text
                     continue
             
             # Extract description (paragraph starting with "Jednorázová")
-            if not data['description'] and ('Jednorázová' in p_text or 'plátýnková maska' in p_text):
-                data['description'] = p_text
-                continue
+            if not data['description'] and len(p_text) > 50:  # Minimum length threshold
+                # Skip if it's a specific field
+                if not any(keyword in p_text for keyword in ['Vhodná pro:', 'Typ pleti', 'VHODNÝ PRO', 'Jak použít:']):
+                    data['description'] = p_text
+                    continue
             
             # Extract suitable_for
-            if 'Vhodná pro:' in p_text:
-                data['suitable_for'] = re.sub(r'^.*?Vhodná pro:\s*', '', p_text).strip()
+            if 'vhodná pro:' in p_text.lower():
+                data['suitable_for'] = re.sub(r'^.*?vhodná pro:\s*', '', p_text, flags=re.IGNORECASE).strip()
                 continue
-            elif 'Typ pleti' in p_text:
-                data['suitable_for'] = re.sub(r'^.*?Typ pleti[:\s]*', '', p_text).strip()
+            elif 'typ pleti' in p_text.lower():
+                data['suitable_for'] = re.sub(r'^.*?typ pleti[:\s]*', '', p_text, flags=re.IGNORECASE).strip()
                 continue
-            
+            elif 'vhodný pro' in p_text.lower():
+                data['suitable_for'] = re.sub(r'^.*?vhodný pro[:\s]*', '', p_text, flags=re.IGNORECASE).strip()
+                continue
+
             # Extract how_to_use
-            if 'Jak použít:' in p_text:
-                data['how_to_use'] = re.sub(r'^.*?Jak použít:\s*', '', p_text).strip()
+            if 'jak použít:' in p_text.lower():
+                data['how_to_use'] = re.sub(r'^.*?jak použít:\s*', '', p_text, flags=re.IGNORECASE).strip()
+                continue
+            elif 'použití' in p_text.lower():
+                data['how_to_use'] = re.sub(r'^.*?použití[:\s]*', '', p_text, flags=re.IGNORECASE).strip()
                 continue
     
     # Extract ingredients
@@ -201,6 +220,14 @@ def extract_data(div, url:str) -> Dict[str, Union[str, List[str], float, None]]:
             if ingredients_text.startswith('Ingredients:'):
                 ingredients_text = ingredients_text[12:].strip()
             data['ingredients'] = ingredients_text
+
+    # Extract price
+    price_element = div.find('b', class_='loadPrice')
+    if price_element:
+        try:
+            data['price'] = float(price_element.get_text().strip())
+        except ValueError:
+            data['price'] = None
     
     return data
 
