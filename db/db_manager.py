@@ -320,20 +320,46 @@ class DatabaseManager:
         cursor.execute('SELECT COUNT(*) FROM users WHERE questionnaire_completed = FALSE AND current_question_index > 0')
         active_users = cursor.fetchone()[0]
         
-        # Photo uploads count
+        # Photo uploads count (excluding skipped)
         cursor.execute('SELECT COUNT(*) FROM photos')
         total_photos = cursor.fetchone()[0]
         
-        # Average age (from scale question)
+        # Skipped photos count
+        cursor.execute('''
+            SELECT COUNT(*) FROM answers 
+            WHERE answer_type = 'photo' AND answer_text = 'None'
+        ''')
+        skipped_photos = cursor.fetchone()[0]
+        
+        # Skipped follow-ups count
+        cursor.execute('''
+            SELECT COUNT(*) FROM answers 
+            WHERE followup_text = 'None'
+        ''')
+        skipped_followups = cursor.fetchone()[0]
+        
+        # Skipped text answers count
+        cursor.execute('''
+            SELECT COUNT(*) FROM answers 
+            WHERE answer_type = 'text' AND answer_text = 'None'
+        ''')
+        skipped_text = cursor.fetchone()[0]
+        
+        # Average age (from scale question, excluding None values)
+        # FIXED: Use SQLite-compatible numeric check instead of REGEXP
         cursor.execute('''
             SELECT AVG(CAST(answer_text AS INTEGER)) 
             FROM answers 
-            WHERE question_index = 0 AND answer_text REGEXP '^[0-9]+$'
+            WHERE question_index = 0 
+            AND answer_text != 'None' 
+            AND answer_text != '' 
+            AND CAST(answer_text AS INTEGER) > 0
+            AND LENGTH(answer_text) <= 3
         ''')
         avg_age_result = cursor.fetchone()[0]
         avg_age = avg_age_result if avg_age_result else 0
         
-        # Smokers count
+        # Smokers count (excluding None/skipped answers)
         cursor.execute('''
             SELECT COUNT(*) 
             FROM answers 
@@ -342,13 +368,16 @@ class DatabaseManager:
         smokers_count = cursor.fetchone()[0]
         
         conn.close()
-        
+    
         return {
             'total_users': total_users,
             'completed_users': completed_users,
             'active_users': active_users,
             'completion_rate': completed_users / total_users if total_users > 0 else 0,
             'total_photos': total_photos,
+            'skipped_photos': skipped_photos,
+            'skipped_followups': skipped_followups,
+            'skipped_text': skipped_text,
             'average_age': round(avg_age, 1),
             'smokers_count': smokers_count
         }

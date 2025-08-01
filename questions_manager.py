@@ -106,9 +106,9 @@ class QuestionManager:
             for i, choice in enumerate(question.choices, 1):
                 text += f"\n{i}. {choice}"
         elif question.question_type == QuestionType.SCALE:
-            text += f"\n\nOhodnoťte na škále od {question.scale_min} do {question.scale_max}"
+            # text += f"\n\nOhodnoťte na škále od {question.scale_min} do {question.scale_max}"
+            pass
         elif question.question_type == QuestionType.YES_NO:
-            text += "\n\nOdpovězte: Ano nebo Ne"
             if question.has_followup:
                 text += "\n\n💡 _Pokud odpovíte 'Ano', budete požádáni o doplňující informace_"
         elif question.question_type == QuestionType.PHOTO:

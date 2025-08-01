@@ -9,6 +9,7 @@ import json
 import os
 from dotenv import load_dotenv
 import traceback
+from llm_api import switch_to_assistant_needed
 
 load_dotenv()
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -64,12 +65,26 @@ class SkinCareQuestionnaireBot:
         continue_button = InlineKeyboardButton("▶️ Pokračovat", callback_data="continue_questionnaire")
         keyboard.add(continue_button)
         return keyboard
-
-    def create_last_question_keyboard(self) -> InlineKeyboardMarkup:
-        """Create keyboard for the last question with finish option"""
+    
+    def create_photo_skip_keyboard(self, question_index: int) -> InlineKeyboardMarkup:
+        """Create keyboard with skip option for photo questions"""
         keyboard = InlineKeyboardMarkup()
-        finish_button = InlineKeyboardButton("❌ Ne, ukončit", callback_data="finish_questionnaire")
-        keyboard.add(finish_button)
+        skip_button = InlineKeyboardButton("⏭️ Přeskočit", callback_data=f"skip_photo_{question_index}")
+        keyboard.add(skip_button)
+        return keyboard
+
+    def create_followup_skip_keyboard(self, question_index: int) -> InlineKeyboardMarkup:
+        """Create keyboard with skip option for follow-up questions"""
+        keyboard = InlineKeyboardMarkup()
+        skip_button = InlineKeyboardButton("⏭️ Přeskočit", callback_data=f"skip_followup_{question_index}")
+        keyboard.add(skip_button)
+        return keyboard
+    
+    def create_text_skip_keyboard(self, question_index: int) -> InlineKeyboardMarkup:
+        """Create keyboard with skip option for text questions"""
+        keyboard = InlineKeyboardMarkup()
+        skip_button = InlineKeyboardButton("⏭️ Přeskočit", callback_data=f"skip_text_{question_index}")
+        keyboard.add(skip_button)
         return keyboard
 
     def run_bot(self):
@@ -130,6 +145,39 @@ class SkinCareQuestionnaireBot:
                         "✅ Rozhodli jste se ukončit konzultaci."
                     )
                     await self._complete_questionnaire(call.message.chat.id, user_id)
+                    return
+                
+                # Handle skip photo
+                if data.startswith("skip_photo_"):
+                    question_index = int(data.split("_")[2])
+                    await self.bot.edit_message_reply_markup(
+                        call.message.chat.id, 
+                        call.message.message_id, 
+                        reply_markup=None
+                    )
+                    await self._handle_skip_photo(call.message.chat.id, user_id, question_index)
+                    return
+                
+                # Handle skip follow-up
+                if data.startswith("skip_followup_"):
+                    question_index = int(data.split("_")[2])
+                    await self.bot.edit_message_reply_markup(
+                        call.message.chat.id, 
+                        call.message.message_id, 
+                        reply_markup=None
+                    )
+                    await self._handle_skip_followup(call.message.chat.id, user_id, question_index)
+                    return
+                
+                # NEW: Handle skip text answer
+                if data.startswith("skip_text_"):
+                    question_index = int(data.split("_")[2])
+                    await self.bot.edit_message_reply_markup(
+                        call.message.chat.id, 
+                        call.message.message_id, 
+                        reply_markup=None
+                    )
+                    await self._handle_skip_text(call.message.chat.id, user_id, question_index)
                     return
                 
                 # Handle yes/no answers
@@ -222,14 +270,24 @@ class SkinCareQuestionnaireBot:
                                 original_answer = answer['answer_text']
                                 break
 
+                        # FIX: Add skip keyboard for follow-up question
+                        keyboard = self.create_followup_skip_keyboard(followup_index)
+                        
                         welcome_text = (
                             f"🔄 *Pokračování konzultace*\n\n"
                             f"Čekáme na doplňující informace k předchozí otázce:\n"
                             f"{question_text}\n\n"
                             f"Vaše odpoveď: **{original_answer}**\n\n"
-                            f"💬 {followup_text}"
+                            f"💬 {followup_text}\n\n"
+                            f"⏭️ _Můžete přeskočit kliknutím na tlačítko níže_"
                         )
-                        await self.bot.send_message(msg.chat.id, welcome_text, parse_mode="MARKDOWN")
+                        
+                        await self.bot.send_message(
+                            msg.chat.id, 
+                            welcome_text, 
+                            parse_mode="MARKDOWN",
+                            reply_markup=keyboard  # FIX: Add the keyboard here
+                        )
                     else:
                         welcome_text = (
                             f"🔄 *Pokračování konzultace*\n\n"
@@ -288,13 +346,23 @@ class SkinCareQuestionnaireBot:
                 results_text += f"*Otázka {q_idx + 1}:* {escape_markdown(main_answer['question_text'])}\n"
                 
                 if main_answer['answer_type'] == 'photo':
-                    results_text += f"*Odpověď:* 📷 Fotografie nahrána\n"
+                    if main_answer['answer_text'] == 'None':
+                        results_text += f"*Odpověď:* 📷 ⏭️ Fotografie přeskočena\n"
+                    else:
+                        results_text += f"*Odpověď:* 📷 Fotografie nahrána\n"
                 else:
-                    results_text += f"*Odpověď:* {escape_markdown(main_answer['answer_text'])}\n"
+                    # Handle skipped text answers
+                    if main_answer['answer_text'] == 'None':
+                        results_text += f"*Odpověď:* ⏭️ Přeskočeno\n"
+                    else:
+                        results_text += f"*Odpověď:* {escape_markdown(main_answer['answer_text'])}\n"
                 
-                # Add followup text if exists
+                # Add followup text if exists and not None
                 if main_answer['followup_text']:
-                    results_text += f"*Doplňující info:* {escape_markdown(main_answer['followup_text'])}\n"
+                    if main_answer['followup_text'] == 'None':
+                        results_text += f"*Doplňující info:* ⏭️ Přeskočeno\n"
+                    else:
+                        results_text += f"*Doplňující info:* {escape_markdown(main_answer['followup_text'])}\n"
                 
                 results_text += "\n"
             
@@ -306,7 +374,7 @@ class SkinCareQuestionnaireBot:
             else:
                 await self.bot.send_message(msg.chat.id, results_text, parse_mode="MARKDOWN")
             
-            # Send photos separately
+            # Send photos separately (only non-skipped ones)
             if photos:
                 await self.bot.send_message(msg.chat.id, "📷 *Vaše nahrané fotografie:*", parse_mode="MARKDOWN")
                 for photo in photos:
@@ -338,8 +406,18 @@ class SkinCareQuestionnaireBot:
 • 📷 Pro fotografie klikněte na 📎 a vyberte fotku
 • 💾 Váš postup se ukládá automaticky
 • ✅ Při odpovědi "Ano" na některé otázky budete požádáni o doplňující informace
-            """
+• ⏭️ **NOVÉ:** Jakoukoliv otázku můžete přeskočit tlačítkem "Přeskočit"
+• 🔄 Přeskočené odpovědi se zobrazí jako "Přeskočeno" ve výsledcích
+
+*Typy otázek, které lze přeskočit:*
+• 📝 Textové odpovědi
+• 🔢 Hodnocení na škále
+• 📋 Výběr z možností
+• 📷 Nahrání fotografií
+• 💬 Doplňující informace
+"""
             await self.bot.send_message(msg.chat.id, help_text, parse_mode="MARKDOWN")
+
 
         @self.bot.message_handler(commands=['stats'])
         async def handle_stats(msg: Message):
@@ -353,9 +431,12 @@ class SkinCareQuestionnaireBot:
 🔄 Probíhá konzultace: {stats['active_users']}
 📈 Míra dokončení: {stats['completion_rate']:.1%}
 📷 Nahráno fotografií: {stats['total_photos']}
+⏭️ Přeskočeno fotografií: {stats['skipped_photos']}
+⏭️ Přeskočeno textových odpovědí: {stats['skipped_text']}
+⏭️ Přeskočeno doplňujících info: {stats['skipped_followups']}
 👤 Průměrný věk: {stats['average_age']} let
 🚬 Kuřáků: {stats['smokers_count']}
-            """
+"""
             await self.bot.send_message(msg.chat.id, stats_text, parse_mode="MARKDOWN")
 
         @self.bot.message_handler(content_types=['photo'])
@@ -432,9 +513,13 @@ class SkinCareQuestionnaireBot:
                 )
                 
                 user_data = self.db.get_user(user_id)
+                current_question_index = user_data['current_question_index']
+                total_questions = self.question_manager.get_total_questions()
+                question_text = self.question_manager.get_question(current_question_index).text
                 
                 # Check if questionnaire is completed
                 if user_data['questionnaire_completed']:
+                    # AG: SEND DIRECTLY TO SPECIALIST
                     await self.bot.send_message(
                         msg.chat.id,
                         "✅ Konzultace je již dokončena! Použijte /vysledky pro zobrazení nebo /restart pro nové vyplnění."
@@ -443,9 +528,15 @@ class SkinCareQuestionnaireBot:
 
                 # Handle followup answers
                 if user_data.get('waiting_for_followup'):
+
+                    if switch_to_assistant_needed(last_question=question_text, user_message=message_text):
+                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                        return
+
                     followup_question_index = user_data.get('followup_question_index')
                     if followup_question_index is not None:
                         self.db.save_followup_answer(user_id, followup_question_index, message_text)
+                        user_data = self.db.get_user(user_id)
                         self.waiting_for_followup.discard(user_id)
                         
                         await self.bot.send_message(msg.chat.id, "✅ Doplňující informace uloženy!")
@@ -454,9 +545,9 @@ class SkinCareQuestionnaireBot:
                         next_question_index = followup_question_index + 1
                         await self._send_question(msg.chat.id, user_id, next_question_index)
                         return
+                    
+                    # AG: reset user_data.get('waiting_for_followup')
 
-                current_question_index = user_data['current_question_index']
-                total_questions = self.question_manager.get_total_questions()
 
                 # Process answer if user is in questionnaire mode
                 if user_id in self.waiting_for_answer:
@@ -474,6 +565,7 @@ class SkinCareQuestionnaireBot:
                             "Použijte /start pro zahájení konzultace nebo /help pro nápovědu."
                         )
                     else:
+                        # AG: BOT HERE
                         welcome_text = (
                             f"Máte nedokončenou konzultaci (otázka {current_question_index + 1}/{total_questions}). "
                             "Klikněte na tlačítko pro pokračování."
@@ -493,6 +585,64 @@ class SkinCareQuestionnaireBot:
                     "😔 Došlo k chybě. Zkuste to prosím znovu nebo použijte /help."
                 )
 
+    async def _handle_skip_photo(self, chat_id: int, user_id: int, question_index: int):
+        """Handle skipping photo upload"""
+        question = self.question_manager.get_question(question_index)
+        
+        # Save None as answer for skipped photo
+        self.db.save_answer(
+            user_id=user_id,
+            question_index=question_index,
+            question_text=question.text,
+            answer_text="None",  # Store None as string
+            answer_type='photo'
+        )
+        
+        # Clear waiting state
+        self.waiting_for_photo.discard(user_id)
+        
+        await self.bot.send_message(chat_id, "⏭️ Fotografie přeskočena")
+        
+        # Send next question
+        next_question_index = question_index + 1
+        await self._send_question(chat_id, user_id, next_question_index)
+
+    async def _handle_skip_followup(self, chat_id: int, user_id: int, question_index: int):
+        """Handle skipping follow-up question"""
+        # Save None as followup text
+        self.db.save_followup_answer(user_id, question_index, "None")
+        
+        # Clear waiting state
+        self.waiting_for_followup.discard(user_id)
+        
+        await self.bot.send_message(chat_id, "⏭️ Doplňující informace přeskočeny")
+        
+        # Continue to next question
+        next_question_index = question_index + 1
+        await self._send_question(chat_id, user_id, next_question_index)
+
+    async def _handle_skip_text(self, chat_id: int, user_id: int, question_index: int):
+        """Handle skipping text answer"""
+        question = self.question_manager.get_question(question_index)
+        
+        # Save None as answer for skipped text question
+        self.db.save_answer(
+            user_id=user_id,
+            question_index=question_index,
+            question_text=question.text,
+            answer_text="None",
+            answer_type='text'
+        )
+        
+        # Clear waiting state
+        self.waiting_for_answer.discard(user_id)
+        
+        await self.bot.send_message(chat_id, "⏭️ Otázka přeskočena")
+        
+        # Send next question
+        next_question_index = question_index + 1
+        await self._send_question(chat_id, user_id, next_question_index)
+
     async def _send_question(self, chat_id: int, user_id: int, question_index: int):
         """Send a specific question to the user with appropriate keyboard"""
         total_questions = self.question_manager.get_total_questions()
@@ -511,8 +661,13 @@ class SkinCareQuestionnaireBot:
         keyboard = None
         if question.question_type == QuestionType.YES_NO:
             keyboard = self.create_yes_no_keyboard(question_index)
-        elif question_index == total_questions - 1:  # Last question
-            keyboard = self.create_last_question_keyboard()
+        elif question.question_type == QuestionType.PHOTO:
+            keyboard = self.create_photo_skip_keyboard(question_index)
+            progress_text += "\n\n⏭️ _Můžete přeskočit kliknutím na tlačítko níže_"
+        elif question.question_type in [QuestionType.TEXT, QuestionType.CHOICE, QuestionType.SCALE]:
+            # NEW: Add skip button for text-based questions
+            keyboard = self.create_text_skip_keyboard(question_index)
+            progress_text += "\n\n⏭️ _Můžete přeskočit kliknutím na tlačítko níže_"
         
         await self.bot.send_message(
             chat_id,
@@ -549,10 +704,16 @@ class SkinCareQuestionnaireBot:
             self.waiting_for_followup.add(user_id)
             
             followup_text = question.followup_text
+            
+            # NEW: Create message with skip button for follow-up
+            keyboard = self.create_followup_skip_keyboard(question_index)
+            message_text = f"💬 {followup_text}\n\n⏭️ _Můžete přeskočit kliknutím na tlačítko níže_"
+            
             await self.bot.send_message(
                 chat_id, 
-                f"💬 {followup_text}",
-                parse_mode="MARKDOWN"
+                message_text,
+                parse_mode="MARKDOWN",
+                reply_markup=keyboard
             )
         else:
             # No followup needed, advance to next question
@@ -596,8 +757,7 @@ class SkinCareQuestionnaireBot:
 Děkujeme za váš čas a upřímné odpovědi.
 Vaše data byla uložena.
 
-📋 Použijte /vysledky pro zobrazení odpovědí
-📄 Použijte /export pro stažení dat
+📋 Použijte /results pro zobrazení odpovědí
 🔄 Použijte /restart pro novou konzultaci
         """
         

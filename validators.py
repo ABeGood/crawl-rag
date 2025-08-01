@@ -11,6 +11,10 @@ class NormalizedTextResponse(BaseModel):
         return v.strip()
     
 
+class MessageClassifierResponse(BaseModel):
+    switch_to_assistant: bool = Field(..., description="User message classification")
+
+
 def extract_json_from_markdown(text: str) -> str:
     """Extract JSON content from markdown code blocks."""
     # Method 1: Using regex to find content between ```json and ```
