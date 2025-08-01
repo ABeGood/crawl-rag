@@ -211,11 +211,22 @@ class SkinCareQuestionnaireBot:
                         followup_index = user_data.get('followup_question_index', current_index - 1)
                         followup_text = self.question_manager.get_followup_text(followup_index)
                         question_text = self.question_manager.get_question(followup_index).text
+
+                        # Get the user's original answer for this question
+                        user_answers = self.db.get_user_answers(msg.from_user.id)
+                        original_answer = "Odpověď nenalezena"
+                        
+                        # Find the answer for the specific question index
+                        for answer in user_answers:
+                            if answer['question_index'] == followup_index:
+                                original_answer = answer['answer_text']
+                                break
+
                         welcome_text = (
                             f"🔄 *Pokračování konzultace*\n\n"
                             f"Čekáme na doplňující informace k předchozí otázce:\n"
                             f"{question_text}\n\n"
-                            f"Vaše odpoveď: TODO\n\n"
+                            f"Vaše odpoveď: **{original_answer}**\n\n"
                             f"💬 {followup_text}"
                         )
                         await self.bot.send_message(msg.chat.id, welcome_text, parse_mode="MARKDOWN")
