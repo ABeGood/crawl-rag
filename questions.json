@@ -1,0 +1,96 @@
+[
+    {
+        "text": "Kolik je vám let? 😊",
+        "type": "scale",
+        "scale_min": 1,
+        "scale_max": 120,
+        "required": true
+    },
+    {
+        "text": "Kouříte? 🚬",
+        "type": "yes_no",
+        "required": true,
+        "has_followup": false
+    },
+    {
+        "text": "Léčíte se aktuálně s nějakým zdravotním problémem nebo užíváte pravidelně nějaké léky či hormony? 💊",
+        "type": "yes_no",
+        "required": true,
+        "has_followup": true,
+        "followup_text": "Můžete mi prosím sdělit, o jaké onemocnění nebo léky se jedná? Tyto informace mi pomohou lépe porozumět potřebám vaší pleti. 📝"
+    },
+    {
+        "text": "Pracujete nebo trávíte čas v náročném prostředí? (například u počítače, venku, v klimatizaci, ve stresu) 🏢",
+        "type": "yes_no",
+        "required": true,
+        "has_followup": true,
+        "followup_text": "Můžete mi prosím popsat, jaké prostředí to je? Například: kancelář s klimatizací, venkovní práce, stresové prostředí... 🌡️"
+    },
+    {
+        "text": "Nahrát první fotografii vaší pleti 📸\n\nProsím, vyfotografujte svou pleť při přirozeném světle, nejlépe bez make-upu.",
+        "type": "photo",
+        "required": true
+    },
+    {
+        "text": "Nahrát druhou fotografii vaší pleti 📸\n\nPokud je to možné, vyfotografujte pleť z jiného úhlu nebo detail problematické oblasti.",
+        "type": "photo",
+        "required": true
+    },
+    {
+        "text": "Máte pocit, že je vaše pleť dehydratovaná nebo suchá? Cítíte napětí, šupinatost? 💧",
+        "type": "yes_no",
+        "required": true,
+        "has_followup": true,
+        "followup_text": "Můžete mi prosím popsat, jak se tyto problémy s hydratací projevují? Například: napětí po umytí, šupinatost, svědění... 🌵"
+    },
+    {
+        "text": "Máte citlivou pleť? Reaguje na kosmetiku, počasí nebo stres? 🌸",
+        "type": "yes_no",
+        "required": true,
+        "has_followup": true,
+        "followup_text": "Můžete mi prosím popsat, jak se citlivost projevuje a co ji obvykle vyvolává? Například: zarudnutí, svědění, pálení po kosmetice... 🔴"
+    },
+    {
+        "text": "Bojujete s mastnou pletí? Máte problém s rozšířenými póry nebo lesklou T-zónou? ✨",
+        "type": "yes_no",
+        "required": true,
+        "has_followup": true,
+        "followup_text": "Můžete mi prosím popsat, jak se mastnost projevuje? V jakých částech obličeje? Jak často se musíte 'odlesknout'? 🪞"
+    },
+    {
+        "text": "Vnímáte na své pleti první známky stárnutí? Jemné linky, ztrátu pevnosti? ⏰",
+        "type": "yes_no",
+        "required": true,
+        "has_followup": true,
+        "followup_text": "Můžete mi prosím popsat, jaké změny na pleti pozorujete? Například: linky kolem očí, úbytok pevnosti, změna textury... 🕰️"
+    },
+    {
+        "text": "Máte pigmentové skvrny nebo známky fotostárnutí? Tmavé fleky, nerovnoměrný tón pleti? ☀️",
+        "type": "yes_no",
+        "required": true,
+        "has_followup": true,
+        "followup_text": "Můžete mi prosím popsat, jaké pigmentové změny pozorujete? Kde se nacházejí a jak dlouho je máte? 🎨"
+    },
+    {
+        "text": "Jak vypadá vaše každodenní péče o pleť? Popište mi svou ranní a večerní rutinu. 🌅🌙",
+        "type": "text",
+        "required": true
+    },
+    {
+        "text": "Jaké kosmetické značky nejraději používáte? Máte nějaké osvědčené oblíbence? 💄",
+        "type": "text",
+        "required": true
+    },
+    {
+        "text": "Chodíte na profesionální ošetření pleti ke kosmetičce? 💆‍♀️",
+        "type": "yes_no",
+        "required": true,
+        "has_followup": true,
+        "followup_text": "Můžete mi prosím říct, jak často chodíte a jaké ošetření obvykle absolvujete? Například: hydratační ošetření, čištění, chemický peeling... 🏥"
+    },
+    {
+        "text": "Je něco dalšího, co byste mi chtěli sdělit o vaší pleti nebo očekáváních? Jakékoliv starosti, přání nebo cíle? ✨\n\n(Například: konkrétní problémy, které vás trápí, co byste chtěli zlepšit, alergické reakce...)",
+        "type": "text",
+        "required": false
+    }
+]

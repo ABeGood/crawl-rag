@@ -1,0 +1,15 @@
+[SCALE] Váš věk? | 1-120
+[YES_NO] Kuřák?
+[YES_NO] Léčíte se s nějakým onemocněním, užíváte pravidelně léky, hormony?
+[YES_NO] Pracujete nebo pobýváte v zátěžovém prostředí?
+Nahrát první fotografii.
+Nahrát druhou fotografii.
+[YES_NO] Dehydratovaná, suchá pleť?
+[YES_NO] Citlivá pleť?
+[YES_NO] Mastná pleť?
+[YES_NO] Projevy stárnutí, zralá pleť?
+[YES_NO] Pigmentové skvrny, fotostárnutí?
+Jak vypadá moje každodenní péče o pleť?
+Jaké kosmetické značky používám?
+[YES_NO] Navštěvuji kosmetický salón?
+Doplňující informace?

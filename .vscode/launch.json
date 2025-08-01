@@ -6,10 +6,10 @@
     "configurations": [
 
         {
-            "name": "run",
+            "name": "run_questionary",
             "type": "debugpy",
             "request": "launch",
-            "program": "main.py",
+            "program": "bot_from_llm.py",
             "console": "integratedTerminal"
         }
     ]
