@@ -2,12 +2,13 @@ import asyncio
 import logging
 from time import sleep
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import Message, PhotoSize
+from telebot.types import Message, PhotoSize, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from telebot.formatting import escape_markdown
 from typing import Dict, Any, List
 import json
 import os
 from dotenv import load_dotenv
+import traceback
 
 load_dotenv()
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -39,18 +40,111 @@ class SkinCareQuestionnaireBot:
 
         self.register_handlers()
 
+    def create_yes_no_keyboard(self, question_index: int) -> InlineKeyboardMarkup:
+        """Create inline keyboard for yes/no questions"""
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        
+        # Create buttons with callback data containing question index
+        yes_button = InlineKeyboardButton("✅ Ano", callback_data=f"yn_{question_index}_yes")
+        no_button = InlineKeyboardButton("❌ Ne", callback_data=f"yn_{question_index}_no")
+        
+        keyboard.add(yes_button, no_button)
+        return keyboard
+
+    def create_start_keyboard(self) -> InlineKeyboardMarkup:
+        """Create keyboard for start command"""
+        keyboard = InlineKeyboardMarkup()
+        start_button = InlineKeyboardButton("🚀 Začít konzultaci", callback_data="start_questionnaire")
+        keyboard.add(start_button)
+        return keyboard
+
+    def create_continue_keyboard(self) -> InlineKeyboardMarkup:
+        """Create keyboard for continuing questionnaire"""
+        keyboard = InlineKeyboardMarkup()
+        continue_button = InlineKeyboardButton("▶️ Pokračovat", callback_data="continue_questionnaire")
+        keyboard.add(continue_button)
+        return keyboard
+
     def run_bot(self):
         """Start the bot with improved error handling"""
         self.logger.info("Starting skincare consultation bot...")
         try:
             asyncio.run(self.bot.polling(non_stop=True, timeout=60, request_timeout=90))
         except Exception as e:
-            self.logger.error(f"Bot polling stopped due to an error: {e}")
+            tb = traceback.format_exc()
+            self.logger.error(f"Bot polling stopped due to an error: {e}\nFull traceback:\n{tb}")
             sleep(5)
             self.run_bot()
 
     def register_handlers(self):
         """Register all message handlers"""
+
+        @self.bot.callback_query_handler(func=lambda call: True)
+        async def handle_callback_query(call: CallbackQuery):
+            """Handle all callback queries from inline keyboards"""
+            try:
+                user_id = call.from_user.id
+                data = call.data
+                
+                # Answer the callback to remove loading state
+                await self.bot.answer_callback_query(call.id)
+                
+                # Handle start questionnaire
+                if data == "start_questionnaire":
+                    await self.bot.edit_message_reply_markup(
+                        call.message.chat.id, 
+                        call.message.message_id, 
+                        reply_markup=None
+                    )
+                    await self._send_question(call.message.chat.id, user_id, 0)
+                    return
+                
+                # Handle continue questionnaire
+                if data == "continue_questionnaire":
+                    user_data = self.db.get_user(user_id)
+                    current_question_index = user_data['current_question_index']
+                    await self.bot.edit_message_reply_markup(
+                        call.message.chat.id, 
+                        call.message.message_id, 
+                        reply_markup=None
+                    )
+                    await self._send_question(call.message.chat.id, user_id, current_question_index)
+                    return
+                
+                # Handle yes/no answers
+                if data.startswith("yn_"):
+                    parts = data.split("_")
+                    question_index = int(parts[1])
+                    answer = parts[2]  # "yes" or "no"
+                    
+                    # Convert to Czech
+                    answer_text = "Ano" if answer == "yes" else "Ne"
+                    
+                    # Remove keyboard from the message
+                    await self.bot.edit_message_reply_markup(
+                        call.message.chat.id, 
+                        call.message.message_id, 
+                        reply_markup=None
+                    )
+                    
+                    # Send confirmation with selected answer
+                    await self.bot.send_message(
+                        call.message.chat.id, 
+                        f"✅ Odpověď uložena: *{answer_text}*",
+                        parse_mode="MARKDOWN"
+                    )
+                    
+                    # Process the answer
+                    await self._process_keyboard_answer(call.message.chat.id, user_id, question_index, answer_text)
+                    return
+                    
+            except Exception as e:
+                tb = traceback.format_exc()
+                self.logger.error(f"Error in callback handler: {e}\nFull traceback:\n{tb}")
+                await self.bot.send_message(
+                    call.message.chat.id,
+                    "😔 Došlo k chybě při zpracování odpovědi. Zkuste to prosím znovu."
+                )
 
         @self.bot.message_handler(commands=['start'])
         async def handle_start(msg: Message):
@@ -82,7 +176,14 @@ class SkinCareQuestionnaireBot:
                         f"📋 Celkem otázek: {total_questions}\n"
                         "📷 Budete požádáni o nahrání 2 fotografií\n"
                         "💾 Můžete se kdykoli zastavit a pokračovat později\n\n"
-                        "🚀 Jste připraveni začít? Napište 'Ano' pro zahájení konzultace."
+                        "🚀 Jste připraveni začít?"
+                    )
+                    keyboard = self.create_start_keyboard()
+                    await self.bot.send_message(
+                        msg.chat.id, 
+                        welcome_text, 
+                        parse_mode="MARKDOWN",
+                        reply_markup=keyboard
                     )
                 else:
                     if user_data.get('waiting_for_followup'):
@@ -93,14 +194,20 @@ class SkinCareQuestionnaireBot:
                             f"Čekáme na doplňující informace k předchozí otázce:\n\n"
                             f"💬 {followup_text}"
                         )
+                        await self.bot.send_message(msg.chat.id, welcome_text, parse_mode="MARKDOWN")
                     else:
                         welcome_text = (
                             f"🔄 *Pokračování konzultace*\n\n"
                             f"📊 Postup: {current_index}/{total_questions}\n"
-                            "Napište 'Pokračovat' pro pokračování tam, kde jste skončili."
+                            "Pokračujte tam, kde jste skončili."
                         )
-                
-                await self.bot.send_message(msg.chat.id, welcome_text, parse_mode="MARKDOWN")
+                        keyboard = self.create_continue_keyboard()
+                        await self.bot.send_message(
+                            msg.chat.id, 
+                            welcome_text, 
+                            parse_mode="MARKDOWN",
+                            reply_markup=keyboard
+                        )
 
         @self.bot.message_handler(commands=['restart'])
         async def handle_restart(msg: Message):
@@ -174,7 +281,8 @@ class SkinCareQuestionnaireBot:
                             caption += f": {photo['photo_description']}"
                         await self.bot.send_photo(msg.chat.id, photo['file_id'], caption=caption)
                     except Exception as e:
-                        self.logger.error(f"Failed to send photo {photo['file_id']}: {e}")
+                        tb = traceback.format_exc()
+                        self.logger.error(f"Failed to send photo {photo['file_id']}: {e}\nFull traceback:\n{tb}")
 
         @self.bot.message_handler(commands=['help'])
         async def handle_help(msg: Message):
@@ -189,9 +297,9 @@ class SkinCareQuestionnaireBot:
 /stats - Zobrazit statistiky
 
 *Jak vyplňovat konzultaci:*
-• 📝 Odpovídejte na otázky postupně
-• 🔢 Pro otázky s výběrem použijte číslo nebo napište odpověď
-• 📊 Pro hodnocení zadejte číslo v uvedeném rozsahu
+• 🔘 Pro otázky Ano/Ne klikněte na tlačítka
+• 📝 Pro textové otázky napište odpověď
+• 🔢 Pro hodnocení zadejte číslo v uvedeném rozsahu
 • 📷 Pro fotografie klikněte na 📎 a vyberte fotku
 • 💾 Váš postup se ukládá automaticky
 • ✅ Při odpovědi "Ano" na některé otázky budete požádáni o doplňující informace
@@ -263,7 +371,8 @@ class SkinCareQuestionnaireBot:
                 await self._send_question(msg.chat.id, user_id, next_question_index)
                 
             except Exception as e:
-                self.logger.error(f"Error handling photo: {e}")
+                tb = traceback.format_exc()
+                self.logger.error(f"Error handling photo: {e}\nFull traceback:\n{tb}")
                 await self.bot.send_message(
                     msg.chat.id,
                     "😔 Chyba při nahrávání fotografie. Zkuste to prosím znovu."
@@ -314,16 +423,6 @@ class SkinCareQuestionnaireBot:
                 current_question_index = user_data['current_question_index']
                 total_questions = self.question_manager.get_total_questions()
 
-                # Handle start triggers
-                if current_question_index == 0 and message_text.lower() in ['ano', 'yes', 'začít', 'start']:
-                    await self._send_question(msg.chat.id, user_id, 0)
-                    return
-                
-                # Handle continue triggers
-                if message_text.lower() in ['pokračovat', 'continue', 'ano', 'pokracovat']:
-                    await self._send_question(msg.chat.id, user_id, current_question_index)
-                    return
-
                 # Process answer if user is in questionnaire mode
                 if user_id in self.waiting_for_answer:
                     await self._process_answer(msg.chat.id, user_id, current_question_index, message_text)
@@ -340,21 +439,27 @@ class SkinCareQuestionnaireBot:
                             "Použijte /start pro zahájení konzultace nebo /help pro nápovědu."
                         )
                     else:
+                        welcome_text = (
+                            f"Máte nedokončenou konzultaci (otázka {current_question_index + 1}/{total_questions}). "
+                            "Klikněte na tlačítko pro pokračování."
+                        )
+                        keyboard = self.create_continue_keyboard()
                         await self.bot.send_message(
                             msg.chat.id,
-                            f"Máte nedokončenou konzultaci (otázka {current_question_index + 1}/{total_questions}). "
-                            "Napište 'Pokračovat' pro pokračování."
+                            welcome_text,
+                            reply_markup=keyboard
                         )
 
             except Exception as e:
-                self.logger.error(f"Error in handle_message: {e}")
+                tb = traceback.format_exc()
+                self.logger.error(f"Error in handle_message: {e}\nFull traceback:\n{tb}")
                 await self.bot.send_message(
                     msg.chat.id,
                     "😔 Došlo k chybě. Zkuste to prosím znovu nebo použijte /help."
                 )
 
     async def _send_question(self, chat_id: int, user_id: int, question_index: int):
-        """Send a specific question to the user"""
+        """Send a specific question to the user with appropriate keyboard"""
         total_questions = self.question_manager.get_total_questions()
         
         if question_index >= total_questions:
@@ -364,17 +469,58 @@ class SkinCareQuestionnaireBot:
         question = self.question_manager.get_question(question_index)
         question_text = self.question_manager.get_question_text_with_options(question_index)
         
+        # Add progress indicator
+        progress_text = f"📊 *Otázka {question_index + 1}/{total_questions}*\n\n{question_text}"
+        
+        # Determine if we need keyboard
+        keyboard = None
+        if question.question_type == QuestionType.YES_NO:
+            keyboard = self.create_yes_no_keyboard(question_index)
+        
         await self.bot.send_message(
             chat_id,
-            question_text,
-            parse_mode="MARKDOWN"
+            progress_text,
+            parse_mode="MARKDOWN",
+            reply_markup=keyboard
         )
         
         # Set appropriate waiting state
         if question.question_type == QuestionType.PHOTO:
             self.waiting_for_photo.add(user_id)
-        else:
+        elif question.question_type != QuestionType.YES_NO:  # For yes/no, we wait for callback
             self.waiting_for_answer.add(user_id)
+
+    async def _process_keyboard_answer(self, chat_id: int, user_id: int, question_index: int, answer: str):
+        """Process answer from keyboard button"""
+        question = self.question_manager.get_question(question_index)
+        
+        # Save answer
+        self.db.save_answer(
+            user_id=user_id,
+            question_index=question_index,
+            question_text=question.text,
+            answer_text=answer
+        )
+        
+        # Check if we need followup for YES answers
+        if (question.question_type == QuestionType.YES_NO and 
+            answer == "Ano" and 
+            question.has_followup):
+            
+            # Set followup state
+            self.db.set_waiting_for_followup(user_id, question_index)
+            self.waiting_for_followup.add(user_id)
+            
+            followup_text = question.followup_text
+            await self.bot.send_message(
+                chat_id, 
+                f"💬 {followup_text}",
+                parse_mode="MARKDOWN"
+            )
+        else:
+            # No followup needed, advance to next question
+            next_question_index = question_index + 1
+            await self._send_question(chat_id, user_id, next_question_index)
 
     async def _process_answer(self, chat_id: int, user_id: int, question_index: int, answer: str):
         """Process user's answer to a question"""
@@ -398,26 +544,9 @@ class SkinCareQuestionnaireBot:
         # Clear waiting state
         self.waiting_for_answer.discard(user_id)
         
-        # Check if we need followup for YES answers
-        if (question.question_type == QuestionType.YES_NO and 
-            processed_answer == "Ano" and 
-            question.has_followup):
-            
-            # Set followup state
-            self.db.set_waiting_for_followup(user_id, question_index)
-            self.waiting_for_followup.add(user_id)
-            
-            followup_text = question.followup_text
-            await self.bot.send_message(
-                chat_id, 
-                f"✅ Odpověď uložena!\n\n💬 {followup_text}",
-                parse_mode="MARKDOWN"
-            )
-        else:
-            # No followup needed, advance to next question
-            await self.bot.send_message(chat_id, "✅ Odpověď uložena!")
-            next_question_index = question_index + 1
-            await self._send_question(chat_id, user_id, next_question_index)
+        await self.bot.send_message(chat_id, "✅ Odpověď uložena!")
+        next_question_index = question_index + 1
+        await self._send_question(chat_id, user_id, next_question_index)
 
     async def _complete_questionnaire(self, chat_id: int, user_id: int):
         """Complete the questionnaire for user"""

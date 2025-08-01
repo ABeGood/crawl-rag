@@ -2,6 +2,7 @@ import json
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+import traceback
 
 class QuestionType(Enum):
     TEXT = "text"
@@ -23,8 +24,11 @@ class Question:
     followup_text: Optional[str] = None  # Text to show when asking for followup
     
     def __post_init__(self):
-        if self.question_type == QuestionType.CHOICE and not self.choices:
-            raise ValueError("Choices must be provided for choice questions")
+        try:
+            if self.question_type == QuestionType.CHOICE and not self.choices:
+                raise ValueError("Choices must be provided for choice questions")
+        except Exception as e:
+            raise ValueError(f"Error validating question at index {self.index} ('{self.text[:50]}...'): {e}")
 
 class QuestionManager:
     def __init__(self, questions_file: str):
@@ -48,27 +52,35 @@ class QuestionManager:
 
     def _load_json_questions(self, content: str):
         """Load questions from JSON format"""
-        data = json.loads(content)
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as e:
+            raise Exception(f"Invalid JSON format in questions file at line {e.lineno}, column {e.colno}: {e.msg}")
         
         for i, item in enumerate(data):
-            if isinstance(item, str):
-                question = Question(index=i, text=item.strip())
-            elif isinstance(item, dict):
-                question = Question(
-                    index=i,
-                    text=item['text'].strip(),
-                    question_type=QuestionType(item.get('type', 'text')),
-                    choices=item.get('choices'),
-                    scale_min=item.get('scale_min', 1),
-                    scale_max=item.get('scale_max', 10),
-                    required=item.get('required', True),
-                    has_followup=item.get('has_followup', False),
-                    followup_text=item.get('followup_text')
-                )
-            else:
-                raise ValueError(f"Invalid question format at index {i}")
-            
-            self.questions.append(question)
+            try:
+                if isinstance(item, str):
+                    question = Question(index=i, text=item.strip())
+                elif isinstance(item, dict):
+                    question = Question(
+                        index=i,
+                        text=item['text'].strip(),
+                        question_type=QuestionType(item.get('type', 'text')),
+                        choices=item.get('choices'),
+                        scale_min=item.get('scale_min', 1),
+                        scale_max=item.get('scale_max', 10),
+                        required=item.get('required', True),
+                        has_followup=item.get('has_followup', False),
+                        followup_text=item.get('followup_text')
+                    )
+                else:
+                    raise ValueError(f"Invalid question format at index {i}: expected string or dict, got {type(item)}")
+                
+                self.questions.append(question)
+                
+            except Exception as e:
+                tb = traceback.format_exc()
+                raise Exception(f"Error processing question at index {i} (question #{i+1}): {e}\nQuestion data: {item}\nTraceback:\n{tb}")
 
 
     def get_question(self, index: int) -> Optional[Question]:
@@ -163,39 +175,16 @@ class QuestionManager:
                 return False, "Prosím, zadejte odpověď"
             return True, answer
 
-    def create_skincare_questions_file(self, filename: str = "questions.txt"):
-        """Create the skincare questions file"""
-        skincare_questions = """[SCALE] Váš věk? | 1-120
-[YES_NO] Kuřák?
-[YES_NO] Léčíte se s nějakým onemocněním, užíváte pravidelně léky, hormony?
-[YES_NO] Pracujete nebo pobýváte v zátěžovém prostředí?
-Nahrát první fotografii.
-Nahrát druhou fotografii.
-[YES_NO] Dehydratovaná, suchá pleť?
-[YES_NO] Citlivá pleť?
-[YES_NO] Mastná pleť?
-[YES_NO] Projevy stárnutí, zralá pleť?
-[YES_NO] Pigmentové skvrny, fotostárnutí?
-Jak vypadá moje každodenní péče o pleť?
-Jaké kosmetické značky používám?
-[YES_NO] Navštěvuji kosmetický salón?
-Doplňující informace?"""
-        
-        with open(filename, 'w', encoding='utf-8') as file:
-            file.write(skincare_questions)
-        
-        print(f"Skincare questions file created: {filename}")
 
 # Usage example
 if __name__ == "__main__":
-    # Create skincare questions file
+    # Create friendly skincare questions file (JSON format)
     qm = QuestionManager.__new__(QuestionManager)
-    # qm.create_skincare_questions_file()
     
     # Load and test
-    qm = QuestionManager("questions.txt")
+    qm = QuestionManager("questions.json")
     
-    print(f"Loaded {qm.get_total_questions()} questions")
+    print(f"Loaded {qm.get_total_questions()} friendly questions")
     
     # Test question formatting
     for i in range(min(5, qm.get_total_questions())):

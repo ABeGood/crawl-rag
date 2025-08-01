@@ -182,14 +182,24 @@ class DatabaseManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Update the existing answer with followup text
+        # First, find the most recent answer ID for this user and question
         cursor.execute('''
-            UPDATE answers 
-            SET followup_text = ?
+            SELECT id FROM answers 
             WHERE user_id = ? AND question_index = ?
             ORDER BY answered_at DESC
             LIMIT 1
-        ''', (followup_text, user_id, question_index))
+        ''', (user_id, question_index))
+        
+        result = cursor.fetchone()
+        if result:
+            answer_id = result[0]
+            
+            # Update the specific answer with followup text
+            cursor.execute('''
+                UPDATE answers 
+                SET followup_text = ?
+                WHERE id = ?
+            ''', (followup_text, answer_id))
         
         # Clear waiting state and advance to next question
         cursor.execute('''
