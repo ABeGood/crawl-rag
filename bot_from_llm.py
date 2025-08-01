@@ -65,6 +65,13 @@ class SkinCareQuestionnaireBot:
         keyboard.add(continue_button)
         return keyboard
 
+    def create_last_question_keyboard(self) -> InlineKeyboardMarkup:
+        """Create keyboard for the last question with finish option"""
+        keyboard = InlineKeyboardMarkup()
+        finish_button = InlineKeyboardButton("❌ Ne, ukončit", callback_data="finish_questionnaire")
+        keyboard.add(finish_button)
+        return keyboard
+
     def run_bot(self):
         """Start the bot with improved error handling"""
         self.logger.info("Starting skincare consultation bot...")
@@ -109,6 +116,20 @@ class SkinCareQuestionnaireBot:
                         reply_markup=None
                     )
                     await self._send_question(call.message.chat.id, user_id, current_question_index)
+                    return
+                
+                # Handle finish questionnaire
+                if data == "finish_questionnaire":
+                    await self.bot.edit_message_reply_markup(
+                        call.message.chat.id, 
+                        call.message.message_id, 
+                        reply_markup=None
+                    )
+                    await self.bot.send_message(
+                        call.message.chat.id, 
+                        "✅ Rozhodli jste se ukončit konzultaci."
+                    )
+                    await self._complete_questionnaire(call.message.chat.id, user_id)
                     return
                 
                 # Handle yes/no answers
@@ -189,9 +210,12 @@ class SkinCareQuestionnaireBot:
                     if user_data.get('waiting_for_followup'):
                         followup_index = user_data.get('followup_question_index', current_index - 1)
                         followup_text = self.question_manager.get_followup_text(followup_index)
+                        question_text = self.question_manager.get_question(followup_index).text
                         welcome_text = (
                             f"🔄 *Pokračování konzultace*\n\n"
-                            f"Čekáme na doplňující informace k předchozí otázce:\n\n"
+                            f"Čekáme na doplňující informace k předchozí otázce:\n"
+                            f"{question_text}\n\n"
+                            f"Vaše odpoveď: TODO\n\n"
                             f"💬 {followup_text}"
                         )
                         await self.bot.send_message(msg.chat.id, welcome_text, parse_mode="MARKDOWN")
@@ -222,7 +246,7 @@ class SkinCareQuestionnaireBot:
                 parse_mode="MARKDOWN"
             )
 
-        @self.bot.message_handler(commands=['vysledky'])
+        @self.bot.message_handler(commands=['results'])
         async def handle_results(msg: Message):
             """Show user's answers in Czech"""
             user_id = msg.from_user.id
@@ -306,7 +330,7 @@ class SkinCareQuestionnaireBot:
             """
             await self.bot.send_message(msg.chat.id, help_text, parse_mode="MARKDOWN")
 
-        @self.bot.message_handler(commands=['statistiky'])
+        @self.bot.message_handler(commands=['stats'])
         async def handle_stats(msg: Message):
             """Show questionnaire statistics in Czech"""
             stats = self.db.get_statistics()
@@ -476,6 +500,8 @@ class SkinCareQuestionnaireBot:
         keyboard = None
         if question.question_type == QuestionType.YES_NO:
             keyboard = self.create_yes_no_keyboard(question_index)
+        elif question_index == total_questions - 1:  # Last question
+            keyboard = self.create_last_question_keyboard()
         
         await self.bot.send_message(
             chat_id,
