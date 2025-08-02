@@ -582,17 +582,14 @@ class SkinCareQuestionnaireBot:
 
 
                 # Process answer if user is in questionnaire mode
-
-                # AG: TEXT ANSWERS NOT HANDLED
                 if user_id in self.waiting_for_answer:
-                    actual_question = self.question_manager.get_question(current_question_index-1)
-                    # actual_question_text = actual_question.text
+                    actual_question = self.question_manager.get_question(current_question_index)
+                    actual_question_text = actual_question.text
 
-                    # if switch_to_assistant_needed(last_question=actual_question_text, user_message=message_text):
-                    #     await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
-                    # else:
-                    #     await self._process_answer(msg.chat.id, user_id, current_question_index, message_text)
-                    await self._process_answer(msg.chat.id, user_id, current_question_index, message_text)
+                    if switch_to_assistant_needed(last_question=actual_question_text, user_message=message_text):
+                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                    else:
+                        await self._process_answer(msg.chat.id, user_id, current_question_index, message_text)
                 elif user_id in self.waiting_for_photo:
                     await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
                     # await self.bot.send_message(

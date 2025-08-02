@@ -215,10 +215,9 @@ class DatabaseManager:
         cursor.execute('''
             UPDATE users 
             SET waiting_for_followup = FALSE, 
-                followup_question_index = NULL,
-                current_question_index = ?
+                followup_question_index = NULL
             WHERE user_id = ?
-        ''', (question_index + 1, user_id))
+        ''', (user_id,))
         
         conn.commit()
         conn.close()
@@ -231,10 +230,9 @@ class DatabaseManager:
         cursor.execute('''
             UPDATE users 
             SET waiting_for_followup = FALSE, 
-                followup_question_index = NULL,
-                current_question_index = ?
+                followup_question_index = NULL
             WHERE user_id = ?
-        ''', (question_index + 1, user_id))
+        ''', (user_id,))
         
         conn.commit()
         conn.close()
