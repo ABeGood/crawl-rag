@@ -69,6 +69,16 @@ class DatabaseManager:
                 FOREIGN KEY (user_id) REFERENCES users (user_id)
             )
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_messages (
+                user_id INTEGER,
+                message_id INTEGER, 
+                message_type TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (user_id)
+            )
+        ''')
         
         conn.commit()
         conn.close()
@@ -419,3 +429,36 @@ class DatabaseManager:
             'photos': photos,
             'export_timestamp': datetime.now().isoformat()
         }
+    
+    # AG USER MESSAGES TRACKING
+    def save_user_message(self, user_id: int, message_id: int, message_type: str = 'question'):
+        """Save message ID for later invalidation"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO user_messages (user_id, message_id, message_type)
+            VALUES (?, ?, ?)
+        ''', (user_id, message_id, message_type))
+        conn.commit()
+
+    def get_user_last_message(self, user_id: int, message_type: str = 'question'):
+        """Get last message ID for user"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT message_id FROM user_messages 
+            WHERE user_id = ? AND message_type = ?
+            ORDER BY created_at DESC LIMIT 1
+        ''', (user_id, message_type))
+        result = cursor.fetchone()
+        return result['message_id'] if result else None
+
+    def clear_user_messages(self, user_id: int, message_type: str = 'question'):
+        """Clear stored message IDs"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+            DELETE FROM user_messages WHERE user_id = ? AND message_type = ?
+        ''', (user_id, message_type))
+        conn.commit()

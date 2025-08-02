@@ -107,6 +107,18 @@ class SkinCareQuestionnaireBot:
             try:
                 user_id = call.from_user.id
                 data = call.data
+
+                # VALIDATE: Check if this is the current active message
+                if data.startswith(("yn_", "skip_")):
+                    current_message_id = self.db.get_user_last_message(user_id, 'question')
+                    if current_message_id and call.message.message_id != current_message_id:
+                        # This is an old message button
+                        await self.bot.answer_callback_query(
+                            call.id, 
+                            "⚠️ Tato otázka už není aktivní. Pokračujte s nejnovější otázkou.",
+                            show_alert=True
+                        )
+                        return
                 
                 # Answer the callback to remove loading state
                 await self.bot.answer_callback_query(call.id)
@@ -515,21 +527,41 @@ class SkinCareQuestionnaireBot:
                 user_data = self.db.get_user(user_id)
                 current_question_index = user_data['current_question_index']
                 total_questions = self.question_manager.get_total_questions()
-                question_text = self.question_manager.get_question(current_question_index).text
                 
                 # Check if questionnaire is completed
                 if user_data['questionnaire_completed']:
-                    # AG: SEND DIRECTLY TO SPECIALIST
-                    await self.bot.send_message(
-                        msg.chat.id,
-                        "✅ Konzultace je již dokončena! Použijte /vysledky pro zobrazení nebo /restart pro nové vyplnění."
-                    )
-                    return
 
+                    # AG: SEND DIRECTLY TO SPECIALIST
+                    await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+
+                    # await self.bot.send_message(
+                    #     msg.chat.id,
+                    #     "✅ Konzultace je již dokončena! Použijte /vysledky pro zobrazení nebo /restart pro nové vyplnění."
+                    # )
+                    return
+                
+                # Check if questionnaire was never started
+                questionnaire_not_started = (
+                    current_question_index == 0 and
+                    user_id not in self.waiting_for_answer and
+                    user_id not in self.waiting_for_photo and
+                    not user_data.get('waiting_for_followup')
+                )
+                
+                if questionnaire_not_started:
+                    # Route to assistant for users who haven't started questionnaire
+                    await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                    return
+                
                 # Handle followup answers
                 if user_data.get('waiting_for_followup'):
 
-                    if switch_to_assistant_needed(last_question=question_text, user_message=message_text):
+                    actual_question = self.question_manager.get_question(current_question_index-1)
+                    actual_question_text = actual_question.text
+                    actualfollowup_question_text = actual_question.followup_text
+                    actual_question_text_full = actual_question_text + ' ' + actualfollowup_question_text
+
+                    if switch_to_assistant_needed(last_question=actual_question_text_full, user_message=message_text):
                         await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
                         return
 
@@ -550,32 +582,43 @@ class SkinCareQuestionnaireBot:
 
 
                 # Process answer if user is in questionnaire mode
+
+                # AG: TEXT ANSWERS NOT HANDLED
                 if user_id in self.waiting_for_answer:
+                    actual_question = self.question_manager.get_question(current_question_index-1)
+                    # actual_question_text = actual_question.text
+
+                    # if switch_to_assistant_needed(last_question=actual_question_text, user_message=message_text):
+                    #     await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                    # else:
+                    #     await self._process_answer(msg.chat.id, user_id, current_question_index, message_text)
                     await self._process_answer(msg.chat.id, user_id, current_question_index, message_text)
                 elif user_id in self.waiting_for_photo:
-                    await self.bot.send_message(
-                        msg.chat.id,
-                        "📷 Očekávám fotografii. Klikněte na 📎 a vyberte fotku z vašeho zařízení."
-                    )
+                    await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                    # await self.bot.send_message(
+                    #     msg.chat.id,
+                    #     "📷 Očekávám fotografii. Klikněte na 📎 a vyberte fotku z vašeho zařízení."
+                    # )
                 else:
                     # Provide guidance
                     if current_question_index == 0:
-                        await self.bot.send_message(
-                            msg.chat.id,
-                            "Použijte /start pro zahájení konzultace nebo /help pro nápovědu."
-                        )
+                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                        # await self.bot.send_message(
+                        #     msg.chat.id,
+                        #     "Použijte /start pro zahájení konzultace nebo /help pro nápovědu."
+                        # )
                     else:
-                        # AG: BOT HERE
-                        welcome_text = (
-                            f"Máte nedokončenou konzultaci (otázka {current_question_index + 1}/{total_questions}). "
-                            "Klikněte na tlačítko pro pokračování."
-                        )
+                        # welcome_text = (
+                        #     f"Máte nedokončenou konzultaci (otázka {current_question_index + 1}/{total_questions}). "
+                        #     "Klikněte na tlačítko pro pokračování."
+                        # )
                         keyboard = self.create_continue_keyboard()
-                        await self.bot.send_message(
-                            msg.chat.id,
-                            welcome_text,
-                            reply_markup=keyboard
-                        )
+                        # await self.bot.send_message(
+                        #     msg.chat.id,
+                        #     welcome_text,
+                        #     reply_markup=keyboard
+                        # )
+                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
 
             except Exception as e:
                 tb = traceback.format_exc()
@@ -650,6 +693,8 @@ class SkinCareQuestionnaireBot:
         if question_index >= total_questions:
             await self._complete_questionnaire(chat_id, user_id)
             return
+        
+        await self._invalidate_old_question_message(chat_id, user_id)
 
         question = self.question_manager.get_question(question_index)
         question_text = self.question_manager.get_question_text_with_options(question_index)
@@ -669,12 +714,16 @@ class SkinCareQuestionnaireBot:
             keyboard = self.create_text_skip_keyboard(question_index)
             progress_text += "\n\n⏭️ _Můžete přeskočit kliknutím na tlačítko níže_"
         
-        await self.bot.send_message(
+        sent_message = await self.bot.send_message(
             chat_id,
             progress_text,
             parse_mode="MARKDOWN",
             reply_markup=keyboard
         )
+
+        # STORE NEW MESSAGE ID
+        if keyboard:  # Only store messages with keyboards
+            self.db.save_user_message(user_id, sent_message.message_id, 'question')
         
         # Set appropriate waiting state
         if question.question_type == QuestionType.PHOTO:
@@ -698,23 +747,25 @@ class SkinCareQuestionnaireBot:
         if (question.question_type == QuestionType.YES_NO and 
             answer == "Ano" and 
             question.has_followup):
+
+            # INVALIDATE CURRENT MESSAGE (the yes/no question)
+            # await self._invalidate_old_question_message(chat_id, user_id)
             
             # Set followup state
             self.db.set_waiting_for_followup(user_id, question_index)
             self.waiting_for_followup.add(user_id)
             
             followup_text = question.followup_text
-            
-            # NEW: Create message with skip button for follow-up
             keyboard = self.create_followup_skip_keyboard(question_index)
             message_text = f"💬 {followup_text}\n\n⏭️ _Můžete přeskočit kliknutím na tlačítko níže_"
             
-            await self.bot.send_message(
+            sent_message = await self.bot.send_message(
                 chat_id, 
                 message_text,
                 parse_mode="MARKDOWN",
                 reply_markup=keyboard
             )
+            self.db.save_user_message(user_id, sent_message.message_id, 'question')
         else:
             # No followup needed, advance to next question
             next_question_index = question_index + 1
@@ -768,6 +819,8 @@ Vaše data byla uložena.
         self.waiting_for_answer.discard(user_id)
         self.waiting_for_photo.discard(user_id)
         self.waiting_for_followup.discard(user_id)
+        # Clear stored message IDs
+        self.db.clear_user_messages(user_id, 'question')
 
     def _split_message(self, text: str, max_length: int = 4000) -> List[str]:
         """Split long message into smaller parts"""
@@ -788,6 +841,31 @@ Vaše data byla uložena.
             text = text[split_pos:].lstrip('\n')
         
         return parts
+    
+    async def _invalidate_old_question_message(self, chat_id: int, user_id: int):
+        """Invalidate old question message keyboard"""
+        try:
+            # Get last message ID from database
+            last_message_id = self.db.get_user_last_message(user_id, 'question')
+            
+            if last_message_id:
+                try:
+                    # Option 1: Remove keyboard only (recommended)
+                    # await self.bot.edit_message_reply_markup(
+                    #     chat_id=chat_id,
+                    #     message_id=last_message_id,
+                    #     reply_markup=None
+                    # )
+                    
+                    # Option 2: Delete entire message (uncomment if preferred)
+                    await self.bot.delete_message(chat_id, last_message_id)
+                    
+                except Exception as e:
+                    # Message might be too old or already deleted
+                    self.logger.debug(f"Could not edit/delete message {last_message_id}: {e}")
+                
+        except Exception as e:
+            self.logger.error(f"Error invalidating old message: {e}")
 
 # Usage example
 if __name__ == "__main__":
