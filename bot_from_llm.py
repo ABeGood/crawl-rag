@@ -3,7 +3,6 @@ import logging
 from time import sleep
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import Message, PhotoSize, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from telebot.formatting import escape_markdown
 from typing import Dict, Any, List
 import json
 import os
@@ -62,7 +61,7 @@ class SkinCareQuestionnaireBot:
     def create_continue_keyboard(self) -> InlineKeyboardMarkup:
         """Create keyboard for continuing questionnaire"""
         keyboard = InlineKeyboardMarkup()
-        continue_button = InlineKeyboardButton("▶️ Pokračovat", callback_data="continue_questionnaire")
+        continue_button = InlineKeyboardButton("▶️ Pokračovat v dotazniku", callback_data="continue_questionnaire")
         keyboard.add(continue_button)
         return keyboard
     
@@ -136,14 +135,49 @@ class SkinCareQuestionnaireBot:
                 # Handle continue questionnaire
                 if data == "continue_questionnaire":
                     user_data = self.db.get_user(user_id)
+                    user_id = user_data['user_id']
                     current_question_index = user_data['current_question_index']
-                    await self.bot.edit_message_reply_markup(
-                        call.message.chat.id, 
-                        call.message.message_id, 
-                        reply_markup=None
-                    )
-                    await self._send_question(call.message.chat.id, user_id, current_question_index)
-                    return
+                    if user_data.get('waiting_for_followup'):
+                        followup_index = user_data.get('followup_question_index', current_question_index-1)
+                        followup_text = self.question_manager.get_followup_text(followup_index)
+                        question_text = self.question_manager.get_question(followup_index).text
+
+                        # Get the user's original answer for this question
+                        user_answers = self.db.get_user_answers(user_id)
+                        original_answer = "Odpověď nenalezena"
+                        
+                        # Find the answer for the specific question index
+                        for answer in user_answers:
+                            if answer['question_index'] == followup_index:
+                                original_answer = answer['answer_text']
+                                break
+
+                         # FIX: Add skip keyboard for follow-up question
+                        keyboard = self.create_followup_skip_keyboard(followup_index)
+                        
+                        welcome_text = (
+                            f"🔄 *Pokračování konzultace*\n\n"
+                            f"Čekáme na doplňující informace k předchozí otázce:\n"
+                            f"{question_text}\n\n"
+                            f"Vaše odpoveď: **{original_answer}**\n\n"
+                            f"💬 {followup_text}\n\n"
+                            f"⏭️ _Můžete přeskočit kliknutím na tlačítko níže_"
+                        )
+                        
+                        await self.bot.send_message(
+                            call.message.chat.id, 
+                            welcome_text, 
+                            parse_mode="MARKDOWN",
+                            reply_markup=keyboard  # FIX: Add the keyboard here
+                        )
+                    else:
+                        await self.bot.edit_message_reply_markup(
+                            call.message.chat.id, 
+                            call.message.message_id, 
+                            reply_markup=None
+                        )
+                        await self._send_question(call.message.chat.id, user_id, current_question_index)
+                        return
                 
                 # Handle finish questionnaire
                 if data == "finish_questionnaire":
@@ -355,7 +389,7 @@ class SkinCareQuestionnaireBot:
                 answer_list = question_answers[q_idx]
                 main_answer = answer_list[0]
                 
-                results_text += f"*Otázka {q_idx + 1}:* {escape_markdown(main_answer['question_text'])}\n"
+                results_text += f"*Otázka {q_idx + 1}:* {(main_answer['question_text'])}\n"
                 
                 if main_answer['answer_type'] == 'photo':
                     if main_answer['answer_text'] == 'None':
@@ -367,14 +401,14 @@ class SkinCareQuestionnaireBot:
                     if main_answer['answer_text'] == 'None':
                         results_text += f"*Odpověď:* ⏭️ Přeskočeno\n"
                     else:
-                        results_text += f"*Odpověď:* {escape_markdown(main_answer['answer_text'])}\n"
+                        results_text += f"*Odpověď:* {(main_answer['answer_text'])}\n"
                 
                 # Add followup text if exists and not None
                 if main_answer['followup_text']:
                     if main_answer['followup_text'] == 'None':
                         results_text += f"*Doplňující info:* ⏭️ Přeskočeno\n"
                     else:
-                        results_text += f"*Doplňující info:* {escape_markdown(main_answer['followup_text'])}\n"
+                        results_text += f"*Doplňující info:* {(main_answer['followup_text'])}\n"
                 
                 results_text += "\n"
             
@@ -530,14 +564,7 @@ class SkinCareQuestionnaireBot:
                 
                 # Check if questionnaire is completed
                 if user_data['questionnaire_completed']:
-
-                    # AG: SEND DIRECTLY TO SPECIALIST
                     await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
-
-                    # await self.bot.send_message(
-                    #     msg.chat.id,
-                    #     "✅ Konzultace je již dokončena! Použijte /vysledky pro zobrazení nebo /restart pro nové vyplnění."
-                    # )
                     return
                 
                 # Check if questionnaire was never started
@@ -562,7 +589,9 @@ class SkinCareQuestionnaireBot:
                     actual_question_text_full = actual_question_text + ' ' + actualfollowup_question_text
 
                     if switch_to_assistant_needed(last_question=actual_question_text_full, user_message=message_text):
-                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                        await self._invalidate_old_question_message(msg.chat.id, user_id, delete=True)
+                        keyboard = self.create_continue_keyboard()
+                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
                         return
 
                     followup_question_index = user_data.get('followup_question_index')
@@ -577,9 +606,6 @@ class SkinCareQuestionnaireBot:
                         next_question_index = followup_question_index + 1
                         await self._send_question(msg.chat.id, user_id, next_question_index)
                         return
-                    
-                    # AG: reset user_data.get('waiting_for_followup')
-
 
                 # Process answer if user is in questionnaire mode
                 if user_id in self.waiting_for_answer:
@@ -587,34 +613,19 @@ class SkinCareQuestionnaireBot:
                     actual_question_text = actual_question.text
 
                     if switch_to_assistant_needed(last_question=actual_question_text, user_message=message_text):
-                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                        await self._invalidate_old_question_message(msg.chat.id, user_id, delete=False)
+                        keyboard = self.create_continue_keyboard()
+                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
                     else:
                         await self._process_answer(msg.chat.id, user_id, current_question_index, message_text)
                 elif user_id in self.waiting_for_photo:
-                    await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
-                    # await self.bot.send_message(
-                    #     msg.chat.id,
-                    #     "📷 Očekávám fotografii. Klikněte na 📎 a vyberte fotku z vašeho zařízení."
-                    # )
+                    await self._invalidate_old_question_message(msg.chat.id, user_id, delete=False)
+                    keyboard = self.create_continue_keyboard()
+                    await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
                 else:
                     # Provide guidance
-                    if current_question_index == 0:
-                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
-                        # await self.bot.send_message(
-                        #     msg.chat.id,
-                        #     "Použijte /start pro zahájení konzultace nebo /help pro nápovědu."
-                        # )
-                    else:
-                        # welcome_text = (
-                        #     f"Máte nedokončenou konzultaci (otázka {current_question_index + 1}/{total_questions}). "
-                        #     "Klikněte na tlačítko pro pokračování."
-                        # )
+                        await self._invalidate_old_question_message(msg.chat.id, user_id, delete=False)
                         keyboard = self.create_continue_keyboard()
-                        # await self.bot.send_message(
-                        #     msg.chat.id,
-                        #     welcome_text,
-                        #     reply_markup=keyboard
-                        # )
                         await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
 
             except Exception as e:
@@ -691,7 +702,7 @@ class SkinCareQuestionnaireBot:
             await self._complete_questionnaire(chat_id, user_id)
             return
         
-        await self._invalidate_old_question_message(chat_id, user_id)
+        await self._invalidate_old_question_message(chat_id, user_id, delete=False)
 
         question = self.question_manager.get_question(question_index)
         question_text = self.question_manager.get_question_text_with_options(question_index)
@@ -701,6 +712,7 @@ class SkinCareQuestionnaireBot:
         
         # Determine if we need keyboard
         keyboard = None
+        message_type = None   
         if question.question_type == QuestionType.YES_NO:
             keyboard = self.create_yes_no_keyboard(question_index)
         elif question.question_type == QuestionType.PHOTO:
@@ -744,9 +756,6 @@ class SkinCareQuestionnaireBot:
         if (question.question_type == QuestionType.YES_NO and 
             answer == "Ano" and 
             question.has_followup):
-
-            # INVALIDATE CURRENT MESSAGE (the yes/no question)
-            # await self._invalidate_old_question_message(chat_id, user_id)
             
             # Set followup state
             self.db.set_waiting_for_followup(user_id, question_index)
@@ -839,7 +848,7 @@ Vaše data byla uložena.
         
         return parts
     
-    async def _invalidate_old_question_message(self, chat_id: int, user_id: int):
+    async def _invalidate_old_question_message(self, chat_id: int, user_id: int, delete:bool=False):
         """Invalidate old question message keyboard"""
         try:
             # Get last message ID from database
@@ -847,15 +856,14 @@ Vaše data byla uložena.
             
             if last_message_id:
                 try:
-                    # Option 1: Remove keyboard only (recommended)
-                    # await self.bot.edit_message_reply_markup(
-                    #     chat_id=chat_id,
-                    #     message_id=last_message_id,
-                    #     reply_markup=None
-                    # )
-                    
-                    # Option 2: Delete entire message (uncomment if preferred)
-                    await self.bot.delete_message(chat_id, last_message_id)
+                    if delete:
+                        await self.bot.delete_message(chat_id, last_message_id)
+                    else:
+                        await self.bot.edit_message_reply_markup(
+                            chat_id=chat_id,
+                            message_id=last_message_id,
+                            reply_markup=None
+                        )
                     
                 except Exception as e:
                     # Message might be too old or already deleted

@@ -99,7 +99,7 @@ class QuestionManager:
         if not question:
             return "Otázka nenalezena"
         
-        text = f"*Otázka {index + 1}/{self.get_total_questions()}:*\n\n{question.text}"
+        text = f"{question.text}"
         
         if question.question_type == QuestionType.CHOICE and question.choices:
             text += "\n\nVyberte jednu z možností:"
