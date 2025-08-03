@@ -521,9 +521,8 @@ class DatabaseManager:
             cursor.execute('''
                 INSERT INTO user_messages (user_id, message_id, message_type)
                 VALUES (%s, %s, %s)
-                ON CONFLICT (user_id) DO UPDATE SET
+                ON CONFLICT (user_id, message_type) DO UPDATE SET
                     message_id = EXCLUDED.message_id,
-                    message_type = EXCLUDED.message_type,
                     created_at = CURRENT_TIMESTAMP
             ''', (user_id, message_id, message_type))
             conn.commit()
