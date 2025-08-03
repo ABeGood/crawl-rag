@@ -18,9 +18,9 @@ from db.db_manager import DatabaseManager
 from questions_manager import QuestionManager, QuestionType
 
 class SkinCareQuestionnaireBot:
-    def __init__(self, bot_token: str, questions_file: str = "questions.json", db_path: str = "skincare_questionnaire.db"):
+    def __init__(self, bot_token: str, questions_file: str = "questions.json"):
         self.bot = AsyncTeleBot(token=bot_token)
-        self.db = DatabaseManager(db_path)
+        self.db = DatabaseManager()
         self.question_manager = QuestionManager(questions_file)
         
         # State management
@@ -888,14 +888,12 @@ Vaše data byla uložena.
 if __name__ == "__main__":
     # Configuration
     QUESTIONS_FILE = "questions.json"
-    DB_PATH = "db/questionnaire.db"
     
     # Initialize and run bot
     try:
         bot = SkinCareQuestionnaireBot(
             bot_token=BOT_TOKEN,
             questions_file=QUESTIONS_FILE,
-            db_path=DB_PATH
         )
         bot.run_bot()
     except Exception as e:
