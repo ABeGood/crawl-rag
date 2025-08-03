@@ -15,6 +15,11 @@ class MessageClassifierResponse(BaseModel):
     switch_to_assistant: bool = Field(..., description="User message classification")
 
 
+class SpecialistResponse(BaseModel):
+    confidence: int = Field(..., description="LLM confidence in ability to answer the question")
+    answer: str = Field(..., description="Answer to user's query")
+
+
 def extract_json_from_markdown(text: str) -> str:
     """Extract JSON content from markdown code blocks."""
     # Method 1: Using regex to find content between ```json and ```

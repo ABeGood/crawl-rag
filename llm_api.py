@@ -1,9 +1,10 @@
 from dotenv import load_dotenv
 from openai import OpenAI
 import os
-from validators import MessageClassifierResponse, extract_json_from_markdown
+from validators import MessageClassifierResponse, SpecialistResponse, extract_json_from_markdown
 import json
 import logging
+from sim_search import find_similar_questions
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ Output: {{{{"switch_to_assistant": false}}}}
 Now analyze the provided question and user message, then return your classification.
 """
 
-instruction = f"""
+classifier_instruction = f"""
 Your task is to classify user message in Czech language. User is filling a questionary, but during the process he can ask assistant for a consultation or help.
 Yoy need to classify if the user messahe is an answer to a questionary question or if he need to be switched to a customer support assistant.
 Toy will be provided with the two pieces of information:
@@ -113,7 +114,7 @@ Example:
 """
 
 def switch_to_assistant_needed(last_question:str, user_message:str):
-    prompt = instruction.format(QUESTION = last_question, USER_MESSAGE = user_message)
+    prompt = classifier_instruction.format(QUESTION = last_question, USER_MESSAGE = user_message)
 
     response = client.responses.create(
         model="o4-mini-2025-04-16",
@@ -125,3 +126,85 @@ def switch_to_assistant_needed(last_question:str, user_message:str):
     response_dict = json.loads(response_raw)
 
     return response_dict['switch_to_assistant']
+
+
+specialist_instruction = f"""
+You are an AI customer support assistant for a Czech online cosmetics shop. Your task is to answer customer questions accurately and helpfully. You will be provided with similar question-answer pairs to help guide your responses.
+
+First, you will be given a set of question-answer pairs that are similar to the current customer's question. These will be used as reference for your response. The similar question-answer pairs will be provided in the following format:
+
+<similar_qa_pairs>
+{{SIMILAR_QA_PAIRS}}
+</similar_qa_pairs>
+
+Next, you will be given the customer's question:
+
+<customer_question>
+{{CUSTOMER_QUESTION}}
+</customer_question>
+
+Analyze the customer's question and compare it to the similar question-answer pairs provided. Use these pairs as a guide for crafting your response, but do not simply copy them. Your answer should be tailored to the specific customer question.
+
+When answering the question:
+1. Ensure your response is relevant to the Czech online cosmetics shop context.
+2. Provide accurate information based on the similar question-answer pairs and your knowledge of cosmetics.
+3. Be polite, professional, and helpful in your tone.
+4. If the question is about a specific product, include relevant details such as ingredients, usage instructions, or benefits.
+5. If applicable, suggest related products or provide additional helpful information.
+6. Structure your output in json format: {{{{"confidence": int (0-5), "answer": str (actul answer to user's query)}}}}
+7. Your answer must be in Czech language
+
+If you are not at least 4/5 confident in your ability to answer the question accurately, you must ask the customer for additional information. In this case, respond with:
+
+<request_more_info>
+{{{{
+  "confidence": 3, 
+  "answer": "Omlouvám se, ale potřebuji další informace, abych vám mohl lépe pomoct. Mohli byste prosím poskytnout více podrobností o [konkrétní aspekt otázky]?"
+}}}}
+</request_more_info>
+
+If you are confident in your answer, provide your response in the following format:
+
+<answer>
+{{{{
+  "confidence": 4, 
+  "answer": "[Your detailed response to the customer's question in Czech language]"
+}}}}
+</answer>
+
+Remember to always prioritize customer satisfaction and provide accurate, helpful information related to the Czech online cosmetics shop.
+"""
+
+def call_specialist(user_message:str):
+    
+    similar_questions_list = find_similar_questions(user_message)
+
+    similar_questions_str = ""
+
+    for i, qa_dict in enumerate(similar_questions_list, 1):
+      # Extract question and answer from the dictionary
+      question = qa_dict.get('question', '')
+      answer = qa_dict.get('answer', '')
+      
+      # Add formatted question and answer
+      similar_questions_str += f"Question {i}:\n"
+      similar_questions_str += f"{question}\n\n"
+      similar_questions_str += f"Answer {i}:\n"
+      similar_questions_str += f"{answer}\n\n"
+      
+      # Add separator between Q&A pairs (except for the last one)
+      if i < len(similar_questions_list):
+          similar_questions_str += "\n\n"
+
+    prompt = specialist_instruction.format(SIMILAR_QA_PAIRS = similar_questions_str, CUSTOMER_QUESTION = user_message)
+
+    response = client.responses.create(
+        model="o4-mini-2025-04-16",
+        input=prompt,
+    )
+    response_raw = extract_json_from_markdown(response.output_text)
+
+    SpecialistResponse.model_validate_json(response_raw)
+    response_dict = json.loads(response_raw)
+
+    return response_dict['answer']

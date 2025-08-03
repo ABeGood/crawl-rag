@@ -8,7 +8,7 @@ import json
 import os
 from dotenv import load_dotenv
 import traceback
-from llm_api import switch_to_assistant_needed
+from llm_api import switch_to_assistant_needed, call_specialist
 
 load_dotenv()
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -108,16 +108,16 @@ class SkinCareQuestionnaireBot:
                 data = call.data
 
                 # VALIDATE: Check if this is the current active message
-                if data.startswith(("yn_", "skip_")):
-                    current_message_id = self.db.get_user_last_message(user_id, 'question')
-                    if current_message_id and call.message.message_id != current_message_id:
-                        # This is an old message button
-                        await self.bot.answer_callback_query(
-                            call.id, 
-                            "⚠️ Tato otázka už není aktivní. Pokračujte s nejnovější otázkou.",
-                            show_alert=True
-                        )
-                        return
+                # if data.startswith(("yn_", "skip_")):
+                    # current_message_id = self.db.get_user_last_message(user_id, 'question')
+                    # if current_message_id and call.message.message_id != current_message_id:
+                    #     # This is an old message button
+                    #     await self.bot.answer_callback_query(
+                    #         call.id, 
+                    #         "⚠️ Tato otázka už není aktivní. Pokračujte s nejnovější otázkou.",
+                    #         show_alert=True
+                    #     )
+                    #     return
                 
                 # Answer the callback to remove loading state
                 await self.bot.answer_callback_query(call.id)
@@ -564,7 +564,9 @@ class SkinCareQuestionnaireBot:
                 
                 # Check if questionnaire is completed
                 if user_data['questionnaire_completed']:
-                    await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                    # await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                    specialist_answer = call_specialist(message_text)
+                    await self.bot.send_message(msg.chat.id, specialist_answer)
                     return
                 
                 # Check if questionnaire was never started
@@ -577,7 +579,9 @@ class SkinCareQuestionnaireBot:
                 
                 if questionnaire_not_started:
                     # Route to assistant for users who haven't started questionnaire
-                    await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                    # await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!")
+                    specialist_answer = call_specialist(message_text)
+                    await self.bot.send_message(msg.chat.id, specialist_answer)
                     return
                 
                 # Handle followup answers
@@ -591,7 +595,9 @@ class SkinCareQuestionnaireBot:
                     if switch_to_assistant_needed(last_question=actual_question_text_full, user_message=message_text):
                         await self._invalidate_old_question_message(msg.chat.id, user_id, delete=True)
                         keyboard = self.create_continue_keyboard()
-                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
+                        # await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
+                        specialist_answer = call_specialist(message_text)
+                        await self.bot.send_message(msg.chat.id, specialist_answer, reply_markup=keyboard)
                         return
 
                     followup_question_index = user_data.get('followup_question_index')
@@ -615,18 +621,24 @@ class SkinCareQuestionnaireBot:
                     if switch_to_assistant_needed(last_question=actual_question_text, user_message=message_text):
                         await self._invalidate_old_question_message(msg.chat.id, user_id, delete=False)
                         keyboard = self.create_continue_keyboard()
-                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
+                        # await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
+                        specialist_answer = call_specialist(message_text)
+                        await self.bot.send_message(msg.chat.id, specialist_answer, reply_markup=keyboard)
                     else:
                         await self._process_answer(msg.chat.id, user_id, current_question_index, message_text)
                 elif user_id in self.waiting_for_photo:
                     await self._invalidate_old_question_message(msg.chat.id, user_id, delete=False)
                     keyboard = self.create_continue_keyboard()
-                    await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
+                    # await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
+                    specialist_answer = call_specialist(message_text)
+                    await self.bot.send_message(msg.chat.id, specialist_answer, reply_markup=keyboard)
                 else:
                     # Provide guidance
                         await self._invalidate_old_question_message(msg.chat.id, user_id, delete=False)
                         keyboard = self.create_continue_keyboard()
-                        await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
+                        # await self.bot.send_message(msg.chat.id, "✅ SWITCHING TO ASSISTANT!", reply_markup=keyboard)
+                        specialist_answer = call_specialist(message_text)
+                        await self.bot.send_message(msg.chat.id, specialist_answer, reply_markup=keyboard)
 
             except Exception as e:
                 tb = traceback.format_exc()
