@@ -29,8 +29,13 @@ class DatabaseManager:
         }
 
     def _get_connection(self):
-        """Get database connection"""
-        return psycopg2.connect(**self.db_config)
+        """Get database connection with proper error handling"""
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            conn.autocommit = False  # Explicit transaction control
+            return conn
+        except psycopg2.Error as e:
+            raise Exception(f"Database connection failed: {e}")
 
     def init_database(self):
         """Initialize the database with required tables for skincare questionnaire"""
@@ -58,15 +63,15 @@ class DatabaseManager:
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS answers (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT,
-                    question_index INTEGER,
-                    question_text TEXT,
+                    user_id BIGINT NOT NULL,
+                    question_index INTEGER NOT NULL,
+                    question_text TEXT NOT NULL,
                     answer_text TEXT,
                     answer_type TEXT DEFAULT 'text',
                     file_id TEXT NULL,
                     followup_text TEXT NULL,
                     answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    CONSTRAINT fk_answers_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
                 )
             ''')
             
@@ -74,14 +79,14 @@ class DatabaseManager:
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS photos (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT,
-                    question_index INTEGER,
-                    file_id TEXT,
+                    user_id BIGINT NOT NULL,
+                    question_index INTEGER NOT NULL,
+                    file_id TEXT NOT NULL,
                     file_unique_id TEXT,
                     file_size INTEGER,
                     photo_description TEXT,
                     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    CONSTRAINT fk_photos_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
                 )
             ''')
             
@@ -91,24 +96,32 @@ class DatabaseManager:
                     user_id BIGINT PRIMARY KEY,
                     session_data TEXT,
                     last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
                 )
             ''')
 
+            # Fixed user_messages table with proper unique constraint
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS user_messages (
-                    user_id BIGINT,
-                    message_id INTEGER, 
-                    message_type TEXT,
+                    user_id BIGINT NOT NULL,
+                    message_id INTEGER NOT NULL, 
+                    message_type TEXT NOT NULL DEFAULT 'question',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    CONSTRAINT fk_messages_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE,
+                    CONSTRAINT unique_user_message_type UNIQUE (user_id, message_type)
                 )
             ''')
             
+            # Create indexes for better performance
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_answers_user_id ON answers (user_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_answers_question_index ON answers (question_index)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_photos_user_id ON photos (user_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_messages_user_id ON user_messages (user_id)')
+            
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Database initialization failed: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -125,6 +138,8 @@ class DatabaseManager:
             
             user = cursor.fetchone()
             return dict(user) if user else None
+        except psycopg2.Error as e:
+            raise Exception(f"Failed to get user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -148,9 +163,9 @@ class DatabaseManager:
             ''', (user_id, username, first_name, last_name))
             
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to create/update user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -178,9 +193,9 @@ class DatabaseManager:
             ''', (question_index + 1, user_id))
             
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to save answer for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -215,9 +230,9 @@ class DatabaseManager:
             ''', (question_index + 1, user_id))
             
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to save photo for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -235,9 +250,9 @@ class DatabaseManager:
             ''', (question_index, user_id))
             
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to set followup state for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -276,9 +291,9 @@ class DatabaseManager:
             ''', (user_id,))
             
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to save followup answer for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -297,9 +312,9 @@ class DatabaseManager:
             ''', (user_id,))
             
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to clear followup state for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -320,9 +335,9 @@ class DatabaseManager:
             ''', (user_id,))
             
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to mark questionnaire completed for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -341,6 +356,8 @@ class DatabaseManager:
             
             answers = cursor.fetchall()
             return [dict(answer) for answer in answers]
+        except psycopg2.Error as e:
+            raise Exception(f"Failed to get answers for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -359,6 +376,8 @@ class DatabaseManager:
             
             photos = cursor.fetchall()
             return [dict(photo) for photo in photos]
+        except psycopg2.Error as e:
+            raise Exception(f"Failed to get photos for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -369,9 +388,10 @@ class DatabaseManager:
         cursor = conn.cursor()
         
         try:
-            # Delete existing answers and photos
+            # Delete existing answers and photos (CASCADE will handle this automatically)
             cursor.execute('DELETE FROM answers WHERE user_id = %s', (user_id,))
             cursor.execute('DELETE FROM photos WHERE user_id = %s', (user_id,))
+            cursor.execute('DELETE FROM user_messages WHERE user_id = %s', (user_id,))
             
             # Reset user progress
             cursor.execute('''
@@ -385,9 +405,9 @@ class DatabaseManager:
             ''', (user_id,))
             
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to reset progress for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -435,15 +455,16 @@ class DatabaseManager:
             ''')
             skipped_text = cursor.fetchone()[0]
             
-            # Average age (from scale question, excluding None values)
+            # Average age (from scale question, excluding None values) - safer approach
             cursor.execute('''
-                SELECT AVG(answer_text::INTEGER) 
+                SELECT AVG(CAST(answer_text AS INTEGER)) 
                 FROM answers 
                 WHERE question_index = 0 
                 AND answer_text != 'None' 
                 AND answer_text != '' 
                 AND answer_text ~ '^[0-9]+$'
-                AND LENGTH(answer_text) <= 3
+                AND CHAR_LENGTH(answer_text) <= 3
+                AND CAST(answer_text AS INTEGER) BETWEEN 1 AND 150
             ''')
             avg_age_result = cursor.fetchone()[0]
             avg_age = float(avg_age_result) if avg_age_result else 0
@@ -468,6 +489,8 @@ class DatabaseManager:
                 'average_age': round(avg_age, 1),
                 'smokers_count': smokers_count
             }
+        except psycopg2.Error as e:
+            raise Exception(f"Failed to get statistics: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -480,7 +503,8 @@ class DatabaseManager:
         try:
             # Get user info
             cursor.execute('SELECT * FROM users WHERE user_id = %s', (user_id,))
-            user_info = dict(cursor.fetchone() or {})
+            user_info_row = cursor.fetchone()
+            user_info = dict(user_info_row) if user_info_row else {}
             
             # Get all answers
             cursor.execute('''
@@ -507,17 +531,20 @@ class DatabaseManager:
                 'photos': photos,
                 'export_timestamp': datetime.now().isoformat()
             }
+        except psycopg2.Error as e:
+            raise Exception(f"Failed to export data for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
     
-    # USER MESSAGES TRACKING
+    # USER MESSAGES TRACKING - FIXED IMPLEMENTATION
     def save_user_message(self, user_id: int, message_id: int, message_type: str = 'question'):
-        """Save message ID for later invalidation"""
+        """Save message ID for later invalidation - now with proper conflict handling"""
         conn = self._get_connection()
         cursor = conn.cursor()
         
         try:
+            # Use ON CONFLICT with the proper unique constraint
             cursor.execute('''
                 INSERT INTO user_messages (user_id, message_id, message_type)
                 VALUES (%s, %s, %s)
@@ -526,14 +553,14 @@ class DatabaseManager:
                     created_at = CURRENT_TIMESTAMP
             ''', (user_id, message_id, message_type))
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to save message for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
 
-    def get_user_last_message(self, user_id: int, message_type: str = 'question'):
+    def get_user_last_message(self, user_id: int, message_type: str = 'question') -> Optional[int]:
         """Get last message ID for user"""
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -546,6 +573,8 @@ class DatabaseManager:
             ''', (user_id, message_type))
             result = cursor.fetchone()
             return result[0] if result else None
+        except psycopg2.Error as e:
+            raise Exception(f"Failed to get last message for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
@@ -560,9 +589,9 @@ class DatabaseManager:
                 DELETE FROM user_messages WHERE user_id = %s AND message_type = %s
             ''', (user_id, message_type))
             conn.commit()
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
-            raise e
+            raise Exception(f"Failed to clear messages for user {user_id}: {e}")
         finally:
             cursor.close()
             conn.close()
